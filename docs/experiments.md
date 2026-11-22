@@ -3205,7 +3205,10 @@ the host.
 
 The pass first looks for a directly loaded standalone sampler that feeds both kinds of
 sampling. Modules without one are returned byte-for-byte unchanged. That includes the
-indexed table above and unrelated samples on other samplers. For the sampler it splits,
+indexed table above and unrelated samples on other samplers. It also includes a mixed
+sampler reached another way, such as through a copied pointer or a load with memory
+operands. The pass reports that it found no candidate, not that the module has no
+mixed sampler. For the sampler it splits,
 the profile covers direct, non-array float32 `Texture2D` sampling in one compute entry
 point at a constant LOD of zero. Other uses of that sampler, an occupied binding, a
 nonzero LOD and more than one mixed sampler are rejected with a specific diagnostic.

@@ -58,6 +58,13 @@ def controls(directory):
     assert mapping["ordinary_binding"] == ORDINARY_BINDING
     assert "%u2 = OpSampledImage %type_sampled_image %40 %u1" in split
 
+    # String and ID decorations name the sampler without using it, so they must not block the split.
+    decorated = substitute(SHARED, "OpDecorate %cmpSampler Binding 2",
+                           'OpDecorate %cmpSampler Binding 2\nOpDecorateString %cmpSampler UserSemantic "S"')
+    decorated_split, mapping = split_comparison_sampler(decorated, ORDINARY_BINDING)
+    assert mapping["ordinary_binding"] == ORDINARY_BINDING
+    assert 'OpDecorateString %cmpSampler UserSemantic "S"' in decorated_split
+
     # Unsupported uses of the sampler being split are still rejected.
     for binding in (2, 3, 4):
         rejected(SHARED, binding, f"binding {binding} is occupied in set 0")
@@ -89,14 +96,21 @@ def controls(directory):
     occupied = subprocess.run([*tool, source, directory / "occupied.spvasm", "--ordinary-binding", "3"],
                               capture_output=True, text=True)
     assert occupied.returncode == 1 and "occupied" in occupied.stderr, occupied
+    # Without a candidate, the CLI reports what it looked for rather than claiming there is no mixed use.
+    separate = directory / "separate.spvasm"
+    separate.write_text(separated, encoding="utf-8")
+    none = subprocess.run([*tool, separate, directory / "unchanged.spvasm", "--ordinary-binding", "5"],
+                          capture_output=True, text=True, check=True)
+    assert none.stdout.startswith("unchanged: no candidate sampler found"), none.stdout
+    assert (directory / "unchanged.spvasm").read_text(encoding="utf-8") == separated
     assert not (directory / "occupied.spvasm").exists()
-    return lowered
+    return lowered, decorated_split
 
 
 def emit(directory, assembler, validator, cross):
-    lowered = controls(directory)
+    lowered, decorated_split = controls(directory)
     outputs = {}
-    for name, assembly in (("shared", SHARED), ("lowered", lowered)):
+    for name, assembly in (("shared", SHARED), ("lowered", lowered), ("decorated", decorated_split)):
         text = directory / f"{name}.spvasm"
         text.write_text(assembly, encoding="utf-8")
         module = directory / f"{name}.spv"
@@ -106,8 +120,9 @@ def emit(directory, assembler, validator, cross):
         subprocess.run([cross, module, "--hlsl", "--shader-model", "66", "--output", hlsl], check=True)
         outputs[name] = hlsl
     source = outputs["lowered"].read_text(encoding="utf-8")
-    comparison = re.search(r"SamplerComparisonState\s+(\w+)\s*:\s*register\(s2\b", source)
-    ordinary = re.search(rf"SamplerState\s+(\w+)\s*:\s*register\(s{ORDINARY_BINDING}\b", source)
+    # The host's static samplers live in space 0, so the declarations must name it.
+    comparison = re.search(r"SamplerComparisonState\s+(\w+)\s*:\s*register\(s2,\s*space0\)", source)
+    ordinary = re.search(rf"SamplerState\s+(\w+)\s*:\s*register\(s{ORDINARY_BINDING},\s*space0\)", source)
     assert comparison and ordinary, source
     assert source.count(f"SampleCmpLevelZero({comparison[1]},") == 2, source
     assert source.count(f"SampleLevel({ordinary[1]},") == 1, source

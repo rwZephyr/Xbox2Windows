@@ -22,7 +22,10 @@ import sys
 
 PREFIX = "%x2w_plain_sampler"
 ZERO = {"0", "0.0", "0x0p+0", "-0", "-0.0", "-0x0p+0"}
-ANNOTATIONS = {"OpName", "OpMemberName", "OpDecorate", "OpMemberDecorate", "OpEntryPoint", "OpExecutionMode"}
+# Debug and annotation instructions that name an ID without using its value.
+ANNOTATIONS = {"OpName", "OpMemberName", "OpEntryPoint", "OpExecutionMode",
+               "OpDecorate", "OpMemberDecorate", "OpDecorateId", "OpDecorateString", "OpMemberDecorateString",
+               "OpDecorateStringGOOGLE", "OpMemberDecorateStringGOOGLE"}
 
 
 def _tokens(line):
@@ -48,7 +51,13 @@ def _standalone_sampler(definitions, loaded):
 
 
 def split_comparison_sampler(assembly, ordinary_binding):
-    """Return (assembly, mapping). mapping is None when no sampler has mixed uses."""
+    """Return (assembly, mapping). mapping is None when no candidate sampler is found.
+
+    A candidate is a directly loaded standalone sampler whose sampled images feed both comparison and
+    ordinary sampling. None does not mean the module is free of mixed samplers: one reached through
+    another path (a copied pointer or a load with memory operands, for example) is not a candidate
+    and is returned unchanged.
+    """
     if ordinary_binding < 0:
         raise ValueError("Ordinary sampler binding must be nonnegative")
     lines = assembly.splitlines()
@@ -179,7 +188,8 @@ def main():
     if mapping:
         print(" ".join(f"{key}={value}" for key, value in mapping.items()))
     else:
-        print("unchanged: no sampler with mixed uses")
+        print("unchanged: no candidate sampler found (a directly loaded standalone sampler "
+              "with comparison and ordinary uses)")
     return 0
 
 
